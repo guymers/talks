@@ -1,0 +1,7 @@
+What is shapeless
+  constraints in types - size of a list
+  deriving type classes - encoders, decoders
+  finch - hlist for endpoints
+
+Heterogeneous List (HList)
+  allows you to workaround the 22 item limit in tuples (slick has its own HList implementation)

@@ -1,0 +1,71 @@
+| \rGeneric
+
+The `Generic` type class converts between case classes and HLists.
+
+
+
+
+```
+case class Foo(i: Int, s: String, b: Boolean)
+val foo = Foo(23, "foo", true)
+
+val fooGen = Generic[Foo]
+
+val fooHList = fooGen.to(foo)
+
+val newFoo = fooGen.from(13 :: fooHList.tail)
+```
+---
+| \rRecord
+
+A HList where each value has a name.
+
+
+
+
+```
+import shapeless.record._
+
+val fooRecord =
+  ('i ->> 23) ::
+  ('s ->> "foo") ::
+  ('b ->> true) ::
+  HNil
+val fooRecordI = fooRecord('i)
+
+val keys = fooRecord.keys
+val values = fooRecord.values
+```
+--
+
+```
+val updatedFooRecord = fooRecord + ('i ->> 13)
+val updatedFooRecordI = updatedFooRecord('i)
+```
+---
+| \rLabelledGeneric
+
+The `LabelledGeneric` type class converts between case classes and records.
+
+
+
+
+```
+case class Foo(i: Int, s: String, b: Boolean)
+val foo = Foo(23, "foo", true)
+
+val fooLabelledGen = LabelledGeneric[Foo]
+val fooRecord = fooLabelledGen.to(foo)
+```
+
+--
+```
+case class ExtendedFoo(i: Int, s: String, b: Boolean, f: Float)
+
+val extendedFooRecord = fooRecord + ('f ->> 1.23f)
+
+val extendedFooLabelledGen = LabelledGeneric[ExtendedFoo]
+val extendedFoo = extendedFooLabelledGen.from(extendedFooRecord)
+println(extendedFoo)
+```
+---

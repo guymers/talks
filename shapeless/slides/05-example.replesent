@@ -1,0 +1,227 @@
+| \rExample - Merging case classes
+
+```
+final case class Config(
+  str: String,
+  num: Int,
+  bool: Boolean,
+  inner: InnerConfig
+)
+
+final case class InnerConfig(float: Float, list: List[String])
+
+object Config {
+  val DEFAULT = Config(
+    str = "str",
+    num = 0,
+    bool = false,
+    inner = InnerConfig(float = 1.23f, list = List("a", "b"))
+  )
+}
+```
+---
+| \rExample - Merging case classes
+
+    {
+      \b"str"\s: \r"new str 1"\s,
+      \b"inner"\s: {
+        \b"float"\s: \y9.87\s
+      }
+    }
+
+```
+Config(
+  str = "new str 1",
+  num = 0,
+  bool = false,
+  inner = InnerConfig(float = 9.87f, list = List("a", "b"))
+)
+```
+---
+| \rExample - Merging case classes
+
+```
+sealed abstract class Partial[+A]
+object Partial {
+  case object Undefined extends Partial[Nothing]
+  case object Null extends Partial[Nothing]
+  final case class Value[+V](value: V) extends Partial[V]
+}
+
+final case class PartialConfig(
+  str: Partial[String],
+  num: Partial[Int],
+  bool: Partial[Boolean],
+  inner: Partial[PartialInnerConfig]
+)
+
+final case class PartialInnerConfig(
+  float: Partial[Float],
+  list: Partial[List[String]]
+)
+```
+---
+| \rExample - Merging case classes
+
+```
+val json = """
+  {
+    "str": "new str 1",
+    "num": null,
+    "inner": {
+      "float": 9.87
+    }
+  }
+"""
+
+val partialConfig = io.circe.parser.decode[PartialConfig](json)
+println(partialConfig == Right(PartialConfig(
+  str = Partial.Value("new str 1"),
+  num = Partial.Null,
+  bool = Partial.Undefined,
+  inner = Partial.Value(PartialInnerConfig(
+    float = Partial.Value(9.87f),
+    list = Partial.Undefined
+  ))
+)))
+```
+---
+| \rExample - Merging case classes
+
+```
+import shapeless._, shapeless.labelled._
+
+// how to merge two values, instances will be manually created
+sealed trait MergePartial[V, P] {
+  def merge(value: V, partialValue: P): V
+}
+
+// how to merge a case class, instances will be derived
+sealed trait MergePartialFields[V, P] extends DepFn2[V, P] {
+  type Out
+}
+
+object MergePartialFields {
+
+  type Aux[V, P, Out0] = MergePartialFields[V, P] { type Out = Out0 }
+
+  implicit val hnil: Aux[HNil, HNil, HNil] =
+    new MergePartialFields[HNil, HNil] {
+      type Out = HNil
+
+      def apply(v: HNil, p: HNil): Out = HNil
+    }
+
+```
+---
+```
+
+  // merge two values that have an instance of MergePartial instance between them
+  implicit def hcons[K, V, P, VT <: HList, PT <: HList](implicit
+    merge: MergePartial[V, P],
+    opt: MergePartialFields.Aux[VT, PT, VT]
+  ): Aux[
+    FieldType[K, V] :: VT,
+    FieldType[K, Partial[P]] :: PT,
+    FieldType[K, V] :: opt.Out
+  ] =
+    new MergePartialFields[FieldType[K, V] :: VT, FieldType[K, Partial[P]] :: PT] {
+      type Out = FieldType[K, V] :: opt.Out
+
+      def apply(v: FieldType[K, V] :: VT, p: FieldType[K, Partial[P]] :: PT): Out = {
+
+        val head: V = (p.head: Partial[P]) match {
+          case Partial.Undefined | Partial.Null => v.head
+          case Partial.Value(_p) => merge.merge(v.head, _p)
+        }
+        field[K](head) :: opt(v.tail, p.tail)
+      }
+    }
+
+```
+---
+```
+
+  // convert case classes into records
+  implicit def clazz[V, P, VL <: HList, PL <: HList](implicit
+    vGen: LabelledGeneric.Aux[V, VL],
+    pGen: LabelledGeneric.Aux[P, PL],
+    merge: MergePartialFields.Aux[VL, PL, VL]
+  ): MergePartialFields.Aux[V, P, V] =
+    new MergePartialFields[V, P] {
+      type Out = V
+
+      def apply(v: V, p: P): Out = {
+        val hlist = merge(vGen.to(v), pGen.to(p))
+        vGen.from(hlist)
+      }
+    }
+
+```
+---
+| \rExample - Merging case classes
+
+```
+object MergePartial  {
+
+  def derive[V, P](implicit v: MergePartialFields.Aux[V, P, V]): MergePartial[V, P] = {
+    new MergePartial[V, P] {
+      def merge(value: V, partialValue: P): V = v.apply(value, partialValue)
+    }
+  }
+
+  // if the types are the same then take the partial value
+  implicit def mergeSameType[V]: MergePartial[V, V] = new MergePartial[V, V] {
+    override def merge(value: V, partialValue: V): V = partialValue
+  }
+}
+```
+---
+| \rExample - Merging case classes
+
+```
+implicit val configMergePartial: MergePartial[Config, PartialConfig] = {
+  implicit val inner = MergePartial.derive[InnerConfig, PartialInnerConfig]
+  MergePartial.derive[Config, PartialConfig]
+}
+
+val result = configMergePartial.merge(Config.DEFAULT, partialConfig.right.get)
+assert(result == Config(
+  str = "new str 1",
+  num = 0,
+  bool = false,
+  inner = InnerConfig(float = 9.87f, list = List("a", "b"))
+))
+```
+---
+| \rExample - Merging case classes
+
+
+Field is not `Partial`
+```
+final case class TestA(a: String)
+final case class PartialTestA(a: String)
+
+MergePartial.derive[TestA, PartialTestA]
+```
+--
+
+
+Extra fields
+```
+final case class TestB(a: String, b: Int)
+final case class PartialTestB(a: Partial[String])
+
+MergePartial.derive[TestB, PartialTestB]
+```
+--
+
+
+Field names do not match
+```
+final case class TestC(ab: String)
+final case class PartialTestC(a: Partial[String])
+
+MergePartial.derive[TestC, PartialTestC]
+```
+---

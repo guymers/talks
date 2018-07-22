@@ -26,10 +26,10 @@ case class REPLesent(
   import scala.util.{ Try, Success, Failure }
 
   private case class Config(
-    top: String = "*"
-  , bottom: String = "*"
-  , sinistral: String = "* "
-  , dextral: String = " *"
+    top: String = ""
+  , bottom: String = "-"
+  , sinistral: String = " "
+  , dextral: String = " "
   , newline: String = System.lineSeparator
   , whiteSpace: String = " "
   , private val width: Int
@@ -155,7 +155,7 @@ case class REPLesent(
 
     private object LeftAligned extends Style {
       def apply(line: Line, margin: Int): String = {
-        val left = margin / 2
+        val left = (margin / 2).min(6)
         val right = horizontalSpace - left - line.length
 
         fill(line, left, right)
@@ -246,7 +246,7 @@ case class REPLesent(
 
     private lazy val emojis: Map[String, String] = {
       Try {
-        val emoji = io.Source.fromFile("emoji.txt").getLines
+        val emoji = scala.io.Source.fromFile("emoji.txt").getLines
         emoji.map { l =>
           val a = l.split(' ')
           (a(1), a(0))
@@ -341,7 +341,7 @@ case class REPLesent(
 
     def currentSlideNumber: Int = slideCursor
 
-    def runCode: Unit = {
+    def runCode(quiet: Boolean = false): Unit = {
       val code = currentSlide.code(buildCursor)
 
       if (repl.isEmpty) {
@@ -349,7 +349,11 @@ case class REPLesent(
       } else if (code.isEmpty) {
         Console.err.print("No code for you")
       } else {
-        repl foreach (_.interpret(code))
+        if (quiet) {
+          repl foreach (r => r.beQuietDuring(r.interpret(code)))
+        } else {
+          repl foreach (_.interpret(code))
+        }
       }
     }
   }
@@ -383,10 +387,10 @@ case class REPLesent(
             .list
             .sorted
             .filter(_.endsWith(".replesent"))
-            .flatMap { name => io.Source.fromFile(new File(pathFile, name)).getLines }
+            .flatMap { name => scala.io.Source.fromFile(new File(pathFile, name)).getLines }
             .toIterator
         } else {
-          io.Source.fromFile(path).getLines
+          scala.io.Source.fromFile(path).getLines
         }
       )
       parse(lines)
@@ -442,7 +446,7 @@ case class REPLesent(
 
         Seq[(String, Regex)](
           "r" -> string
-        , "c" -> reserved
+        , "b" -> reserved
         , "m" -> special
         , "g" -> typeSig
         , "y" -> number
@@ -468,7 +472,7 @@ case class REPLesent(
             .getOrElse(line)
         })
 
-        (Line("< " + formatted), Option(line))
+        (Line("    " + formatted), Option(line))
       }
     }
 
@@ -526,7 +530,7 @@ case class REPLesent(
   private def render(build: Build): String = {
     import config._
 
-    val topPadding = (verticalSpace - build.size) / 2
+    val topPadding = 0 //(verticalSpace - build.size) / 2
     val bottomPadding = verticalSpace - topPadding - build.content.size
 
     val margin = horizontalSpace - build.maxLength
@@ -615,9 +619,12 @@ case class REPLesent(
   def L: Unit = Last
   def >>| : Unit = Last
 
-  def run: Unit = deck.runCode
+  def run: Unit = deck.runCode(quiet = false)
   def r: Unit = run
   def !! : Unit = run
+
+  def runQuiet: Unit = deck.runCode(quiet = true)
+  def q: Unit = runQuiet
 
   def blank: Unit = print(config.newline * config.screenHeight)
   def b: Unit = blank
@@ -625,4 +632,151 @@ case class REPLesent(
   def help: Unit = print(helpMessage)
   def h: Unit = help
   def ? : Unit = help
+}
+
+
+
+
+
+
+
+import shapeless._
+import shapeless.labelled._
+import shapeless.test.illTyped
+import shapeless.ops.nat._
+import shapeless.syntax.sized._
+import shapeless.syntax.singleton._
+
+final case class Config(
+  str: String,
+  num: Int,
+  bool: Boolean,
+  inner: InnerConfig
+)
+
+final case class InnerConfig(float: Float, list: List[String])
+
+object Config {
+  val DEFAULT = Config(
+    str = "str",
+    num = 0,
+    bool = false,
+    inner = InnerConfig(float = 1.23f, list = List("a", "b"))
+  )
+}
+
+
+sealed abstract class Partial[+A]
+object Partial {
+  case object Undefined extends Partial[Nothing]
+  case object Null extends Partial[Nothing]
+  final case class Value[+V](value: V) extends Partial[V]
+}
+
+final case class PartialConfig(
+  str: Partial[String],
+  num: Partial[Int],
+  bool: Partial[Boolean],
+  inner: Partial[PartialInnerConfig]
+)
+
+final case class PartialInnerConfig(
+  float: Partial[Float],
+  list: Partial[List[String]]
+)
+
+
+
+import io.circe.{Decoder, DecodingFailure, FailedCursor, HCursor}
+import io.circe.generic.semiauto.deriveDecoder
+
+object Decoders {
+
+  implicit val partialConfigDecoder: Decoder[PartialConfig] = deriveDecoder
+  implicit val partialInnerConfigDecoder: Decoder[PartialInnerConfig] = deriveDecoder
+
+  implicit def partialDecoder[V](implicit D: Decoder[V]): Decoder[Partial[V]] = {
+    Decoder.withReattempt {
+      case c: HCursor =>
+        if (c.value.isNull) Right(Partial.Null)
+        else c.as[V].map(Partial.Value.apply)
+      case c: FailedCursor =>
+        if (!c.incorrectFocus) Right(Partial.Undefined)
+        else Left(DecodingFailure("Partial[V]", c.history))
+    }
+  }
+}
+import Decoders._
+
+
+
+sealed trait MergePartial[V, P] {
+  def merge(value: V, partialValue: P): V
+}
+
+object MergePartial {
+
+  def derive[V, P](implicit v: MergePartialFields.Aux[V, P, V]): MergePartial[V, P] = {
+    new MergePartial[V, P] {
+      def merge(value: V, partialValue: P): V = v.apply(value, partialValue)
+    }
+  }
+
+  // if the types are the same then take the partial value
+  implicit def mergeSameType[V]: MergePartial[V, V] = new MergePartial[V, V] {
+    override def merge(value: V, partialValue: V): V = partialValue
+  }
+
+}
+
+sealed trait MergePartialFields[V, P] extends DepFn2[V, P] {
+  type Out
+}
+
+object MergePartialFields {
+
+  type Aux[V, P, Out0] = MergePartialFields[V, P] { type Out = Out0 }
+
+  implicit val hnil: Aux[HNil, HNil, HNil] =
+    new MergePartialFields[HNil, HNil] {
+      type Out = HNil
+
+      def apply(v: HNil, p: HNil): Out = HNil
+    }
+
+  // merge two values that have an instance of MergePartial instance between them.
+  implicit def hcons[K, V, P, VT <: HList, PT <: HList](implicit
+    merge: MergePartial[V, P],
+    opt: Aux[VT, PT, VT]
+  ): Aux[
+    FieldType[K, V] :: VT,
+    FieldType[K, Partial[P]] :: PT,
+    FieldType[K, V] :: opt.Out
+    ] =
+    new MergePartialFields[FieldType[K, V] :: VT, FieldType[K, Partial[P]] :: PT] {
+      type Out = FieldType[K, V] :: opt.Out
+
+      def apply(v: FieldType[K, V] :: VT, p: FieldType[K, Partial[P]] :: PT): Out = {
+        val head: V = (p.head: Partial[P]) match {
+          case Partial.Undefined | Partial.Null => v.head
+          case Partial.Value(_p) => merge.merge(v.head, _p)
+        }
+        field[K](head) :: opt(v.tail, p.tail)
+      }
+    }
+
+  implicit def clazz[V, P, VL <: HList, PL <: HList](implicit
+    vGen: LabelledGeneric.Aux[V, VL],
+    pGen: LabelledGeneric.Aux[P, PL],
+    merge: Aux[VL, PL, VL]
+  ): Aux[V, P, V] =
+    new MergePartialFields[V, P] {
+      type Out = V
+
+      def apply(v: V, p: P): Out = {
+        val hlist = merge(vGen.to(v), pGen.to(p))
+        vGen.from(hlist)
+      }
+    }
+
 }

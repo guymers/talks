@@ -1,0 +1,85 @@
+| \rHeterogeneous List (HList)
+
+`List` is homogeneous - all elements have the same underlying type
+
+`Tuple{1,22}` is heterogeneous - each element can have an unrelated type
+
+`HList` is effectively a tuple with infinite length
+
+Constructed in the same way as a `List` - `::` and `HNil`
+
+```
+val hlist = 1 :: "string" :: true :: ("tuple", 1) :: HNil
+val e0 = hlist(0)
+val e3 = hlist(3)
+
+illTyped { """ hlist(4) """ }
+
+val head = hlist.head
+val tail = hlist.tail
+```
+---
+| \rPolymorphic functions
+
+A function that accepts multiple unrelated types
+
+```
+val hlist2 = 1 :: "string" :: ("tuple", 1) :: HNil
+```
+--
+
+```
+object size extends Poly1 {
+  implicit def caseInt = at[Int](_ => 1)
+  implicit def caseString = at[String](_.length)
+  implicit def caseTuple[A, B](implicit
+    evA: Case.Aux[A, Int],
+    evB: Case.Aux[B, Int]
+  ) = at[(A, B)](t => size(t._1) + size(t._2))
+}
+
+size("test")
+```
+--
+
+```
+val sizes = hlist2.map(size)
+val sizesList = sizes.toList
+
+val summedSizes = hlist2.foldMap(0)(size)(_ + _)
+```
+--
+
+```
+hlist.map(size)
+```
+---
+| \rHList and Tuples
+
+As tuples are a fixed length heterogeneous list they can be treated as one
+
+```
+val tuple = (1, "string", true, ("tuple", 1))
+
+{import syntax.std.tuple._
+
+println { tuple(0) }
+println { tuple(3) }
+
+illTyped { """ tuple(4) """ }
+
+println { tuple.head }
+println { tuple.tail }
+}
+```
+--
+
+```
+{import syntax.std.tuple._
+
+val tuple2 = tuple.take(2) ++ tuple.drop(3)
+val tupleSizes = tuple2.map(size)
+println { tupleSizes.toList }
+}
+```
+---

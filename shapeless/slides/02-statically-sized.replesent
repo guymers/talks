@@ -1,0 +1,72 @@
+| \rStatically known sized collections
+
+```
+def row(cols: IndexedSeq[String]) = cols.mkString("'", "','", "'")
+
+def csv[N <: Nat](
+  hdrs: Sized[IndexedSeq[String], N],
+  rows: List[Sized[IndexedSeq[String], N]]
+): List[String] = row(hdrs) :: rows.map(row(_))
+
+val hdrs = Sized("Header 1", "Header 2")
+
+val rows = List(
+  Sized("Row 1 Value 1", "Row 1 Value 2"),
+  Sized("Row 2 Value 1", "Row 2 Value 2")
+)
+
+val formatted = csv(hdrs, rows)
+formatted.foreach(println)
+```
+--
+
+```
+val extendedHdrs = Sized("Header 1", "Header 2", "Header 3")
+
+csv(extendedHdrs, rows)
+```
+---
+| \rSized collections from dynamic
+
+```
+val dynamicRows = List(
+  IndexedSeq("Row 1 Value 1", "Row 1 Value 2"),
+  IndexedSeq("Row 2 Value 1", "Row 2 Value 2", "Row 2 Value 3"),
+  IndexedSeq("Row 3 Value 1", "Row 3 Value 2")
+)
+
+val dynamicSizedRows = dynamicRows.map(_.sized(2)).flatten
+val formattedDynamic = csv(hdrs, dynamicSizedRows)
+formattedDynamic.foreach(println)
+```
+---
+| \rType level natural numbers
+
+Integers can be represented at the type level using `Nat`
+
+`Nat` is a trait with `Succ` and `_0` implementations
+
+```
+val zero = Nat._0
+val one = Succ[_0]()
+val two = Succ[Succ[_0]]()
+
+println(two.toInt)
+```
+--
+
+Basic operations are available
+
+```
+val sum = Sum[Nat._2, Nat._3]
+val five = Nat.toInt[sum.Out]
+
+val min = Min[Nat._2, Nat._3]
+val two = Nat.toInt[min.Out]
+
+println(five); println(two)
+
+val gt = GT[Nat._3, Nat._2]
+illTyped { """ val notGT = GT[Nat._2, Nat._3] """ }
+```
+---

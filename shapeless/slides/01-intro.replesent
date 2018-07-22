@@ -1,0 +1,15 @@
+| \rIntroduction to shapeless
+
+
+| Sam Guymer
+---
+| \rWhat is shapeless
+
+"shapeless is a type class and dependent type based generic programming library for Scala".
+
+Allows constraints to be specified in types
+
+Allows deriving type classes
+
+Used by: Finch, circe, refined, etc
+---
